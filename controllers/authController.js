@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 // Signup
 const signup = async (req, res) => {
   try {
-    const { email, password, fullName } = req.body;
+    const { email, password, fullName, phone, country, city, bio } = req.body;
     
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -23,6 +23,26 @@ const signup = async (req, res) => {
 
     if (error) {
       return res.status(400).json({ error: error.message });
+    }
+
+    // Create user profile in custom users table
+    if (data.user) {
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: fullName || '',
+          phone: phone || null,
+          country: country || null,
+          city: city || null,
+          bio: bio || null
+        });
+
+      if (profileError) {
+        console.error('Error creating user profile:', profileError);
+        // Don't fail the signup if profile creation fails
+      }
     }
 
     res.status(201).json({ 
@@ -93,13 +113,33 @@ const profile = async (req, res) => {
       return res.status(401).json({ error: 'Missing token' });
     }
 
-    const { data, error } = await supabase.auth.getUser(token);
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
 
-    if (error) {
+    if (authError) {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
-    res.json({ user: data.user });
+    // Get user profile from custom users table
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (userError) {
+      console.error('Error fetching user profile:', userError);
+      // Return basic auth data if profile not found
+      return res.json({ 
+        user: authData.user,
+        profile: null,
+        message: 'Profile not found in database'
+      });
+    }
+
+    res.json({ 
+      user: authData.user,
+      profile: userData
+    });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -180,11 +220,170 @@ const verifyEmail = async (req, res) => {
   }
 };
 
+// Update user profile (protected)
+const updateProfile = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ error: 'Missing token' });
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { fullName, phone, country, city, bio, website, twitterHandle, githubUsername } = req.body;
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        full_name: fullName,
+        phone: phone,
+        country: country,
+        city: city,
+        bio: bio,
+        website: website,
+        twitter_handle: twitterHandle,
+        github_username: githubUsername,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', authData.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ 
+      message: 'Profile updated successfully',
+      profile: data
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Get user favorites (protected)
+const getFavorites = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ error: 'Missing token' });
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { data, error } = await supabase
+      .from('user_favorites')
+      .select('*')
+      .eq('user_id', authData.user.id)
+      .order('added_at', { ascending: false });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ favorites: data });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Add coin to favorites (protected)
+const addToFavorites = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ error: 'Missing token' });
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { coinId, coinName, coinSymbol } = req.body;
+    
+    if (!coinId) {
+      return res.status(400).json({ error: 'Coin ID is required' });
+    }
+
+    const { data, error } = await supabase
+      .from('user_favorites')
+      .insert({
+        user_id: authData.user.id,
+        coin_id: coinId,
+        coin_name: coinName || '',
+        coin_symbol: coinSymbol || ''
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') { // Unique constraint violation
+        return res.status(400).json({ error: 'Coin already in favorites' });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ 
+      message: 'Coin added to favorites',
+      favorite: data
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Remove coin from favorites (protected)
+const removeFromFavorites = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ error: 'Missing token' });
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { coinId } = req.params;
+    
+    if (!coinId) {
+      return res.status(400).json({ error: 'Coin ID is required' });
+    }
+
+    const { error } = await supabase
+      .from('user_favorites')
+      .delete()
+      .eq('user_id', authData.user.id)
+      .eq('coin_id', coinId);
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ message: 'Coin removed from favorites' });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = { 
   signup, 
   login, 
   logout, 
   profile, 
+  updateProfile,
+  getFavorites,
+  addToFavorites,
+  removeFromFavorites,
   requestPasswordReset, 
   updatePassword, 
   verifyEmail 

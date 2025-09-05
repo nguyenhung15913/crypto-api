@@ -5,6 +5,10 @@ const {
   login, 
   logout, 
   profile, 
+  updateProfile,
+  getFavorites,
+  addToFavorites,
+  removeFromFavorites,
   requestPasswordReset, 
   updatePassword, 
   verifyEmail 
@@ -30,5 +34,17 @@ router.post('/update-password', updatePassword);
 
 // GET /api/auth/verify-email
 router.get('/verify-email', verifyEmail);
+
+// PUT /api/auth/profile (protected)
+router.put('/profile', updateProfile);
+
+// GET /api/auth/favorites (protected)
+router.get('/favorites', getFavorites);
+
+// POST /api/auth/favorites (protected)
+router.post('/favorites', addToFavorites);
+
+// DELETE /api/auth/favorites/:coinId (protected)
+router.delete('/favorites/:coinId', removeFromFavorites);
 
 module.exports = router;
